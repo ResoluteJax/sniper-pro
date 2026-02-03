@@ -36,7 +36,7 @@ networkx==3.6.1
 numpy==2.4.0
 packaging==25.0
 pandas==2.3.3
-pandas_ta @ file:///C:/Projetos/Sniper_Final/Technical-Analysis-Indicators---Pandas-master.zip#sha256=39e4fcd062cb9d79f8ecbd2189ff1f3b406adb361e516dd189d8cb23aa3d2ab7
+pandas_ta 
 pillow==12.1.0
 propcache==0.4.1
 pycares==4.11.0
