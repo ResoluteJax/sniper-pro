@@ -18,6 +18,16 @@ warnings.filterwarnings("ignore")
 
 app = FastAPI()
 
+@app.get("/")
+def read_root():
+    return {
+        "status": "ONLINE",
+        "message": "Sniper Pro Backend está rodando na Nuvem! 🚀",
+        "region": "Frankfurt (EU)",
+        "time": datetime.now().strftime("%H:%M:%S")
+    }
+
+
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
