@@ -190,22 +190,41 @@ def save_learning_data(ohlcv):
 async def sniper_loop():
     global state, model
     
- # --- AQUI ESTÁ O TRUQUE PARA O RENDER ---
+    # --- AQUI ESTÁ O TRUQUE PARA O RENDER ---
     # Primeiro esperamos o servidor ligar
     await asyncio.sleep(2) 
     
     # MUDANÇA CRÍTICA: Carrega a IA em uma thread separada
-    # Isso impede que o servidor "trave" enquanto baixa o cérebro
     print(">>> Iniciando carregamento assíncrono da IA...")
     await asyncio.to_thread(load_brain_logic)
 
-    exchange = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
+    # ================== MUDANÇA AQUI (COMEÇO) ==================
+    # Substituímos a linha simples antiga por essa configuração blindada:
+    
+    # --- CONFIGURAÇÃO DA CORRETORA COM PROXY (Blindagem) ---
+    PROXY_URL = "http://ppbxvpdh:50wovogiqnv2@31.59.20.176:6754"
+
+    print(f">>> 🛡️ ATIVANDO MODO STEALTH (PROXY)...")
+
+    exchange = ccxt.binance({
+        'enableRateLimit': True,
+        'options': {'defaultType': 'future'},
+        'proxies': {
+            'http': PROXY_URL,
+            'https': PROXY_URL,
+        },
+        'timeout': 30000, 
+    })
+    # ================== MUDANÇA AQUI (FIM) ==================
+
     lstm_states = None
     episode_starts = np.ones((1,), dtype=bool)
     last_exit_time = 0 
     highest_pnl_pct = -1.0 
     
     print(">>> LOOP DE TRADING INICIADO...")
+    
+    # ... (o resto do código continua igual abaixo)
     
     while True:
         try:
