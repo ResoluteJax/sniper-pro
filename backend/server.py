@@ -190,11 +190,14 @@ def save_learning_data(ohlcv):
 async def sniper_loop():
     global state, model
     
-    # --- AQUI ESTÁ O TRUQUE PARA O RENDER ---
-    # Primeiro esperamos o servidor ligar, depois carregamos o modelo
+ # --- AQUI ESTÁ O TRUQUE PARA O RENDER ---
+    # Primeiro esperamos o servidor ligar
     await asyncio.sleep(2) 
-    load_brain_logic() 
-    # ----------------------------------------
+    
+    # MUDANÇA CRÍTICA: Carrega a IA em uma thread separada
+    # Isso impede que o servidor "trave" enquanto baixa o cérebro
+    print(">>> Iniciando carregamento assíncrono da IA...")
+    await asyncio.to_thread(load_brain_logic)
 
     exchange = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
     lstm_states = None
