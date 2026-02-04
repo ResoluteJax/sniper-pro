@@ -50,22 +50,23 @@ state = {
     "entry_price": 0.0,
     "entry_time": None,
     "pnl_open": 0.0,
-    "status": "NEUTRO",
+    "status": "INICIANDO SISTEMA...", # Status inicial
     "chart_data": [],       
     "last_candle": {},
     "trades_history": [],
     "stats": { "wins": 0, "losses": 0, "win_rate": 0.0, "total_trades": 0, "start_time": datetime.now().timestamp() },
-    "training": { "is_training": False, "last_evolution": "Aguardando", "generation": 1 } # Info de Evolução
+    "training": { "is_training": False, "last_evolution": "Aguardando", "generation": 1 }
 }
 
-# Lock para evitar conflito na troca de cérebro
 model_lock = threading.Lock()
+# ATENÇÃO: Definimos model como None aqui para não travar o início
+model = None 
+dummy_env = None
 
-print("--- SNIPER PRO V5 (AUTO-EVOLUTION) ---")
+print("--- SNIPER PRO V6 (CLOUD OPTIMIZED) ---")
 
 if not os.path.exists("data"): os.makedirs("data")
 
-# Função de Features (Obrigatória para Treino e Trading)
 def calculate_features(df):
     try:
         df = df.copy()
@@ -93,56 +94,44 @@ def calculate_features(df):
     except:
         return None, None
 
-# Carrega Modelo Inicial
-try:
-    dummy_df = pd.DataFrame({'close': [100]*200})
-    cols = ['log_ret', 'rsi', 'rsi_slope', 'macd_diff', 'bb_pband', 'bb_width', 'dist_ema50', 'dist_ema200', 'atr_pct']
-    for c in cols: dummy_df[c] = 0.0
-    dummy_env = BitcoinTradingEnv(dummy_df)
-    model = RecurrentPPO.load(MODEL_PATH, env=dummy_env)
-    print(">>> CÉREBRO CARREGADO! 🧠")
-except Exception as e:
-    print(f"ERRO MODELO: {e}")
-    model = None
+# --- FUNÇÃO DE CARREGAMENTO DO MODELO (SEPARADA) ---
+def load_brain_logic():
+    global model, dummy_env, state
+    print(">>> CARREGANDO CÉREBRO EM BACKGROUND... (Isso evita Timeout)")
+    try:
+        dummy_df = pd.DataFrame({'close': [100]*200})
+        cols = ['log_ret', 'rsi', 'rsi_slope', 'macd_diff', 'bb_pband', 'bb_width', 'dist_ema50', 'dist_ema200', 'atr_pct']
+        for c in cols: dummy_df[c] = 0.0
+        dummy_env = BitcoinTradingEnv(dummy_df)
+        model = RecurrentPPO.load(MODEL_PATH, env=dummy_env)
+        print(">>> CÉREBRO CARREGADO COM SUCESSO! 🧠")
+        state["status"] = "NEUTRO (IA PRONTA)"
+    except Exception as e:
+        print(f"ERRO CRÍTICO AO CARREGAR MODELO: {e}")
+        state["status"] = "ERRO NO MODELO"
+        model = None
 
-# --- ENGINE DE AUTO-TREINAMENTO (BACKGROUND) ---
+# --- ENGINE DE AUTO-TREINAMENTO ---
 def train_brain_background():
-    """Esta função roda em paralelo sem travar o trading"""
     global model, state
-    
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] 🧬 INICIANDO EVOLUÇÃO NEURAL...")
     state["training"]["is_training"] = True
     
     try:
-        # 1. Carrega dados acumulados
         if not os.path.exists(DATA_FILE): return
         df = pd.read_csv(DATA_FILE)
-        
-        # Precisa de mínimo de dados (ex: 200 candles)
         if len(df) < 200:
-            print(f"[{timestamp}] ⚠️ Dados insuficientes para evoluir ({len(df)} candles).")
             state["training"]["is_training"] = False
             return
 
-        # 2. Prepara ambiente de treino
         df_processed = calculate_features(df)
         train_env = BitcoinTradingEnv(df_processed)
-        
-        # 3. Carrega uma CÓPIA do modelo atual para treinar
-        # Usamos uma cópia para não bugar o modelo que está operando agora
         learner_model = RecurrentPPO.load(MODEL_PATH, env=train_env)
-        
-        # 4. Treino Rápido (Fine-Tuning)
-        # 2048 passos é rápido (alguns segundos/minutos) e suficiente para adaptar
         learner_model.learn(total_timesteps=4096) 
-        
-        # 5. Salva o novo cérebro
         learner_model.save(MODEL_PATH)
         
-        # 6. HOT-SWAP: Substitui o cérebro global
         with model_lock:
-            # Recarrega o modelo salvo na memória principal
             model = RecurrentPPO.load(MODEL_PATH, env=dummy_env)
             state["training"]["generation"] += 1
             state["training"]["last_evolution"] = timestamp
@@ -155,7 +144,6 @@ def train_brain_background():
     state["training"]["is_training"] = False
 
 def trigger_evolution():
-    # Dispara a thread de treino
     t = threading.Thread(target=train_brain_background)
     t.start()
 
@@ -168,27 +156,39 @@ def save_learning_data(ohlcv):
             df_old = pd.read_csv(DATA_FILE)
             df_combined = pd.concat([df_old, df_new])
             df_combined = df_combined.drop_duplicates(subset=['timestamp'])
-            # Mantém histórico maior para aprendizado (ex: 10.000 candles)
             if len(df_combined) > 10000: df_combined = df_combined.iloc[-10000:]
             df_combined.to_csv(DATA_FILE, index=False)
     except: pass
 
 async def sniper_loop():
     global state, model
+    
+    # --- AQUI ESTÁ O TRUQUE PARA O RENDER ---
+    # Primeiro esperamos o servidor ligar, depois carregamos o modelo
+    await asyncio.sleep(2) 
+    load_brain_logic() 
+    # ----------------------------------------
+
     exchange = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
     lstm_states = None
     episode_starts = np.ones((1,), dtype=bool)
     last_exit_time = 0 
     highest_pnl_pct = -1.0 
     
-    print(">>> MODO AUTO-EVOLUÇÃO ATIVADO...")
+    print(">>> LOOP DE TRADING INICIADO...")
     
     while True:
         try:
+            # Se o modelo ainda não carregou, espera e mostra no status
+            if model is None:
+                state["status"] = "CARREGANDO CÉREBRO..."
+                await asyncio.sleep(5)
+                continue
+
             ohlcv = await exchange.fetch_ohlcv(SYMBOL, timeframe=TIMEFRAME, limit=200)
             save_learning_data(ohlcv) 
 
-            # Processamento de Dados (Visual)
+            # Processamento de Dados
             formatted_history = []
             for candle in ohlcv:
                 formatted_history.append({
@@ -247,12 +247,7 @@ async def sniper_loop():
                 state["position"] = 0
                 state["status"] = "COOLDOWN ❄️"
                 last_exit_time = now_ts
-                
-                # --- GATILHO DE EVOLUÇÃO ---
-                # A cada trade fechado, a IA aprende com o resultado
-                if not state["training"]["is_training"]:
-                    trigger_evolution()
-                
+                if not state["training"]["is_training"]: trigger_evolution()
                 continue
 
             # PREDIÇÃO DA IA
@@ -261,7 +256,6 @@ async def sniper_loop():
                 ema200, rsi = full_df.iloc[-1]['ema200'], full_df.iloc[-1]['rsi']
                 obs = features.iloc[-1].values
                 
-                # Usa Lock para garantir que não estamos trocando o cérebro no meio da decisão
                 with model_lock:
                     action, lstm_states = model.predict(obs, state=lstm_states, episode_start=episode_starts, deterministic=True)
                 
@@ -291,10 +285,7 @@ async def sniper_loop():
                         state["position"] = 0
                         state["status"] = "COOLDOWN ❄️"
                         last_exit_time = now_ts
-                        
-                        # --- GATILHO DE EVOLUÇÃO ---
-                        if not state["training"]["is_training"]:
-                            trigger_evolution()
+                        if not state["training"]["is_training"]: trigger_evolution()
                         continue 
 
                     if target_pos != 0:
@@ -326,4 +317,5 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.on_event("startup")
 async def startup_event():
+    # Iniciamos a tarefa em background, permitindo que a API inicie imediatamente
     asyncio.create_task(sniper_loop())
