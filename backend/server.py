@@ -13,6 +13,7 @@ from datetime import datetime
 from sb3_contrib import RecurrentPPO
 from envs.trading_env import BitcoinTradingEnv
 import warnings
+import gc
 
 warnings.filterwarnings("ignore")
 
@@ -104,21 +105,37 @@ def calculate_features(df):
     except:
         return None, None
 
-# --- FUNÇÃO DE CARREGAMENTO DO MODELO (SEPARADA) ---
+# --- FUNÇÃO DE CARREGAMENTO DO MODELO (ULTRA OTIMIZADA) ---
 def load_brain_logic():
     global model, dummy_env, state
-    print(">>> CARREGANDO CÉREBRO EM BACKGROUND... (Isso evita Timeout)")
+    print(">>> 🧹 LIMPANDO MEMÓRIA ANTES DE CARREGAR A IA...")
+    
+    # Força limpeza do lixo da memória RAM
+    gc.collect()
+    
+    print(">>> CARREGANDO CÉREBRO EM BACKGROUND... (Modo Econômico)")
     try:
-        dummy_df = pd.DataFrame({'close': [100]*200})
+        # Cria um DataFrame minúsculo apenas para inicializar o ambiente
+        # Reduzimos de 200 para 50 linhas para gastar menos RAM na criação
+        dummy_df = pd.DataFrame({'close': [100]*50}) 
         cols = ['log_ret', 'rsi', 'rsi_slope', 'macd_diff', 'bb_pband', 'bb_width', 'dist_ema50', 'dist_ema200', 'atr_pct']
         for c in cols: dummy_df[c] = 0.0
+        
         dummy_env = BitcoinTradingEnv(dummy_df)
-        model = RecurrentPPO.load(MODEL_PATH, env=dummy_env)
+        
+        # Carrega o modelo forçando uso de CPU e evitando ocupar VRAM (que não existe)
+        model = RecurrentPPO.load(MODEL_PATH, env=dummy_env, device="cpu")
+        
         print(">>> CÉREBRO CARREGADO COM SUCESSO! 🧠")
         state["status"] = "NEUTRO (IA PRONTA)"
+        
+        # Limpa novamente vestígios do processo de carregamento
+        del dummy_df
+        gc.collect()
+        
     except Exception as e:
-        print(f"ERRO CRÍTICO AO CARREGAR MODELO: {e}")
-        state["status"] = "ERRO NO MODELO"
+        print(f"ERRO CRÍTICO (MEMÓRIA?): {e}")
+        state["status"] = "ERRO: MEMÓRIA INSUFICIENTE"
         model = None
 
 # --- ENGINE DE AUTO-TREINAMENTO ---
