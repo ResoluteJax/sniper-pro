@@ -324,11 +324,18 @@ async def sniper_loop():
                         highest_pnl_pct = -1.0
                         print(f"[{timestamp_now_str}] 🚀 IA ABRIU {state['status']}")
             
-            await asyncio.sleep(2)
+            # --- MUDANÇA ANTI-BANIMENTO ---
+            # Aumentamos para 15 segundos para evitar erro 418/429
+            print(f"[{timestamp_now_str}] Aguardando 15s para proxima leitura...")
+            await asyncio.sleep(15)
 
         except Exception as e:
-            print(f"❌ ERRO: {e}")
-            await asyncio.sleep(5)
+            if "418" in str(e) or "429" in str(e):
+                print(f"⚠️ BANIMENTO DETECTADO! Entrando em modo de espera por 2 minutos...")
+                await asyncio.sleep(120) # Espera 2 minutos se der erro de ban
+            else:
+                print(f"❌ ERRO: {e}")
+                await asyncio.sleep(15)
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
